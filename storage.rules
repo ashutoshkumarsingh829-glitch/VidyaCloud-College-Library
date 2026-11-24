@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function librarian() {
+      return verified() && request.auth.token.email == 'kishu3840@gmail.com';
+    }
+
+    match /ebooks/{fileName} {
+      allow read: if verified();
+      allow create, update: if librarian() &&
+        request.resource.contentType == 'application/pdf';
+      allow delete: if librarian();
+    }
+  }
+}

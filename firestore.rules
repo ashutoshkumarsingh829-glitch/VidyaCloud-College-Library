@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verified() {
+      return signedIn() && request.auth.token.email_verified == true;
+    }
+
+    function librarian() {
+      return verified() && request.auth.token.email == 'kishu3840@gmail.com';
+    }
+
+    function bookPath(bookId) {
+      return /databases/$(database)/documents/books/$(bookId);
+    }
+
+    function validBook(book) {
+      return book.keys().hasAll([
+          'isbn', 'title', 'author', 'coverUrl', 'pdfUrl',
+          'totalCopies', 'availableCopies', 'createdAt'
+        ]) &&
+        book.keys().hasOnly([
+          'isbn', 'title', 'author', 'coverUrl', 'pdfUrl',
+          'totalCopies', 'availableCopies', 'createdAt'
+        ]) &&
+        book.isbn is string &&
+        book.title is string &&
+        book.author is string &&
+        book.coverUrl is string &&
+        book.pdfUrl is string &&
+        book.createdAt is timestamp &&
+        book.totalCopies is int &&
+        book.totalCopies > 0 &&
+        book.availableCopies is int &&
+        book.availableCopies >= 0 &&
+        book.availableCopies <= book.totalCopies;
+    }
+
+    match /books/{bookId} {
+      allow read: if verified();
+      allow create: if librarian() && validBook(request.resource.data);
+      allow update: if librarian() && validBook(request.resource.data);
+      allow delete: if librarian() &&
+        resource.data.availableCopies == resource.data.totalCopies;
+    }
+
+    match /loans/{loanId} {
+      allow read: if librarian() ||
+        (verified() && resource.data.studentEmail == request.auth.token.email);
+
+      allow update: if librarian() &&
+        resource.data.status == 'active' &&
+        request.resource.data.status == 'returned' &&
+        request.resource.data.returnedAt == request.time &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'returnedAt']) &&
+        exists(bookPath(resource.data.bookId)) &&
+        get(bookPath(resource.data.bookId)).data.availableCopies is int &&
+        get(bookPath(resource.data.bookId)).data.totalCopies is int &&
+        get(bookPath(resource.data.bookId)).data.availableCopies <
+          get(bookPath(resource.data.bookId)).data.totalCopies &&
+        getAfter(bookPath(resource.data.bookId)).data.availableCopies ==
+          get(bookPath(resource.data.bookId)).data.availableCopies + 1;
+
+      allow delete: if false;
+      allow create: if false;
+    }
+  }
+}
